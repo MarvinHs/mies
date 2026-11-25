@@ -44,6 +44,14 @@ ADMIN_USER=admin ADMIN_PASS=clave1234 npm start
 # http://localhost:3000
 ```
 
+## Respaldo y restauración
+- **Descargar:** Panel → Administradores → «Descargar respaldo» (o `/admin/respaldo`). Baja un JSON con todas las tablas.
+- **Restaurar** en una base vacía:
+  ```bash
+  npm install
+  DATABASE_URL="postgresql://usuario:clave@host/base?sslmode=require" node scripts/restaurar.js mies-respaldo-AAAA-MM-DD.json
+  ```
+
 ## Despliegue en Render
 - Web Service (Node): build `npm install`, start `npm start`.
 - Base de datos: PostgreSQL en [Neon](https://neon.com) (plan gratuito, región us-east-1).

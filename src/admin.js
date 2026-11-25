@@ -244,6 +244,8 @@ async function usuarios(user, flash) {
     <div class="grid-det"><div>
       <table class="tabla"><thead><tr><th>Usuario</th><th>Creado</th></tr></thead><tbody>${rows.map(r => `<tr><td>${h(r.usuario)}${r.id === user.id ? ' <span class="muted">(tú)</span>' : ''}</td><td>${fecha(r.creado)}</td></tr>`).join('')}</tbody></table>
       <p class="muted">${num(cand.n)} cuenta(s) de candidatos registradas.</p>
+      <div class="panel mt"><h2>Respaldo de datos</h2><p class="muted">Descarga una copia de toda la información (usuarios, perfiles, empresas, solicitudes, colocaciones e historial) en un archivo JSON. Guárdalo en un lugar seguro: contiene datos personales.</p>
+      <a class="btn" href="/admin/respaldo">Descargar respaldo</a></div>
     </div><aside>
       <div class="panel"><h2>Nuevo administrador</h2><form method="post" action="/admin/usuarios">
         <label>Usuario<input name="usuario" required minlength="3" pattern="[A-Za-z0-9._\\-@]+"></label>
@@ -343,6 +345,16 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
     if (await db.one('SELECT id FROM usuarios WHERE usuario = ?', [u])) return redirigir(res, '/admin/usuarios', { tipo: 'error', msg: 'Ese usuario ya existe.' });
     await db.q('INSERT INTO usuarios (usuario, hash, rol, creado) VALUES (?,?,?,?)', [u, hashClave(b.clave), 'admin', ahora()]);
     return redirigir(res, '/admin/usuarios', { msg: `Administrador ${u} creado.` });
+  }
+  if (seg[1] === 'respaldo' && m === 'GET') {
+    const datos = { generado: new Date().toISOString(), version: 1, tablas: {} };
+    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos']) {
+      datos.tablas[t] = await db.q(`SELECT * FROM ${t} ORDER BY id`);
+    }
+    const dia = new Date().toISOString().slice(0, 10);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="mies-respaldo-${dia}.json"`, 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(datos, null, 2));
+    return;
   }
   if (seg[1] === 'clave' && m === 'POST') {
     if ((b.clave || '').length < 8 || b.clave !== b.clave2) return redirigir(res, '/admin/usuarios', { tipo: 'error', msg: 'Las contraseñas no coinciden o tienen menos de 8 caracteres.' });

@@ -46,4 +46,5 @@ ADMIN_USER=admin ADMIN_PASS=clave1234 npm start
 
 ## Despliegue en Render
 - Web Service (Node): build `npm install`, start `npm start`.
-- Base de datos: Render PostgreSQL (plan gratuito).
+- Base de datos: PostgreSQL en [Neon](https://neon.com) (plan gratuito, región us-east-1).
+  La cadena de conexión va en la variable `DATABASE_URL` del servicio en Render.

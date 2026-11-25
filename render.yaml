@@ -1,11 +1,3 @@
-databases:
-  - name: mies-db
-    plan: free
-    region: virginia
-    postgresMajorVersion: "17"
-    databaseName: mies_db
-    user: mies_db_user
-
 services:
   - type: web
     name: mies
@@ -17,10 +9,9 @@ services:
     startCommand: npm start
     healthCheckPath: /salud
     envVars:
+      # Base de datos PostgreSQL en Neon (plan gratuito). El valor se configura en Render, no aquí.
       - key: DATABASE_URL
-        fromDatabase:
-          name: mies-db
-          property: connectionString
+        sync: false
       - key: ADMIN_USER
         value: admin
       - key: ADMIN_PASS

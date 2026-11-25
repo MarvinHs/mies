@@ -121,8 +121,22 @@ function authForm({ user, modo, error, usuario = '' }) {
 /* ---------- Formulario de perfil ---------- */
 const sel = (name, opciones, val, ph, req = '') => `<select name="${name}" ${req}><option value="">${h(ph)}</option>${opciones.map(o => `<option${o === val ? ' selected' : ''}>${h(o)}</option>`).join('')}</select>`;
 
-function perfilForm({ user, perfil, d, errores = [], flash }) {
-  const oficioSel = `<select name="oficio" required><option value="">Elige tu área</option>${D.OFICIOS.map(g => `<optgroup label="${h(g.grupo)}">${g.items.map(o => `<option${o === d.oficio ? ' selected' : ''}>${h(o)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+function bloqueCv(cv) {
+  const tam = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  return `<section class="bloque" id="cv"><h2>Tu currículum <span class="opc-tag">Opcional</span></h2><p class="sub">Si tienes un CV, súbelo en PDF o Word (máximo 2 MB). Solo lo verá el equipo de Mies y las empresas a las que te presentemos.</p>
+    <div class="caja cv-caja">
+      <div id="cv-estado">${cv ? `<div class="cv-actual">📄 <a href="/perfil/cv" target="_blank" rel="noopener">${h(cv.archivo)}</a> <span class="muted peq">· ${tam(cv.tamano)} · subido ${fecha(cv.subido)}</span></div>` : '<p class="muted" style="margin:0 0 10px">Aún no has subido tu currículum.</p>'}</div>
+      <div class="cv-acciones">
+        <label class="btn btn-sec btn-peq cv-elegir">${cv ? 'Reemplazar archivo' : 'Elegir archivo'}<input type="file" name="cv" form="form-cv" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" id="cv-input"></label>
+        <button class="btn btn-peq" form="form-cv" id="cv-subir">Subir</button>
+        ${cv ? '<button class="btn btn-peq btn-sec" form="form-cv-borrar" onclick="return confirm(\'¿Quitar tu currículum?\')">Quitar</button>' : ''}
+      </div>
+      <p class="muted peq" id="cv-msg" style="margin:8px 0 0"></p>
+    </div></section>`;
+}
+
+function perfilForm({ user, perfil, d, errores = [], flash, cv = null }) {
+  const oficioSel = `<select name="oficio"><option value="">Elige tu área</option>${D.OFICIOS.map(g => `<optgroup label="${h(g.grupo)}">${g.items.map(o => `<option${o === d.oficio ? ' selected' : ''}>${h(o)}</option>`).join('')}</optgroup>`).join('')}</select>`;
   const estado = perfil ? perfil.estado : 'borrador';
   const avisos = {
     borrador: 'Tu perfil aún no se ha enviado. Puedes guardar y seguir luego; cuando esté completo pulsa «Enviar registro».',
@@ -181,8 +195,12 @@ function perfilForm({ user, perfil, d, errores = [], flash }) {
         </div>
         <label>Títulos, certificaciones y cursos <span class="opc">(opcional)</span><textarea name="titulos" rows="2" maxlength="600" placeholder="Ej.: Licenciatura en Contabilidad, curso de Excel avanzado, licencia categoría 3">${h(d.titulos)}</textarea></label>
         <label>Cuéntanos brevemente tu experiencia<textarea name="resumen" rows="4" maxlength="1500">${h(d.resumen)}</textarea></label>
+        <label>Página web o portafolio <span class="opc">(opcional)</span><input type="text" name="web" value="${h(d.web)}" maxlength="300" placeholder="Ej.: www.miportafolio.com, tu LinkedIn, Behance o GitHub" inputmode="url"></label>
+        <p class="ayuda">Si tienes fotos de tus trabajos o proyectos publicados en algún sitio, pon el enlace aquí.</p>
       </div>
     </section>
+
+    ${bloqueCv(cv)}
 
     <section class="bloque"><h2>Tus valores</h2><p class="sub">Responde con sinceridad. No hay trampa: buscamos conocer cómo actúas en el trabajo.</p>
       ${valoresHtml}
@@ -207,10 +225,35 @@ function perfilForm({ user, perfil, d, errores = [], flash }) {
     </section>
 
     <div class="barra-acciones">
-      <button class="btn btn-sec" name="accion" value="guardar">Guardar y seguir luego</button>
+      <button class="btn btn-sec" name="accion" value="guardar" formnovalidate>Guardar y seguir luego</button>
       <button class="btn" name="accion" value="enviar">${estado === 'borrador' || estado === 'rechazado' ? 'Enviar registro' : 'Guardar cambios'}</button>
     </div>
   </form>
+  <form id="form-cv" method="post" action="/perfil/cv" enctype="multipart/form-data"></form>
+  <form id="form-cv-borrar" method="post" action="/perfil/cv/borrar"></form>
+  <script>
+  (function () {
+    var f = document.getElementById('form-cv'), inp = document.getElementById('cv-input'), msg = document.getElementById('cv-msg'), btn = document.getElementById('cv-subir');
+    if (!window.fetch || !window.FormData) return;
+    btn.style.display = 'none';
+    inp.addEventListener('change', function () {
+      var a = inp.files[0]; if (!a) return;
+      if (a.size > ${2 * 1024 * 1024}) { msg.textContent = 'El archivo pasa de 2 MB. Guárdalo como PDF más liviano.'; msg.className = 'error-txt'; inp.value = ''; return; }
+      var fd = new FormData(); fd.append('cv', a);
+      msg.className = 'muted peq'; msg.textContent = 'Subiendo ' + a.name + '…';
+      fetch('/perfil/cv', { method: 'POST', body: fd, headers: { 'X-Mies': '1' }, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          inp.value = '';
+          if (!j.ok) { msg.className = 'error-txt'; msg.textContent = j.error; return; }
+          document.getElementById('cv-estado').innerHTML = '<div class="cv-actual">📄 <a href="/perfil/cv" target="_blank" rel="noopener"></a> <span class="muted peq">· ' + j.tamano + ' · subido hoy</span></div>';
+          document.querySelector('#cv-estado a').textContent = j.archivo;
+          msg.className = 'ok-txt'; msg.textContent = '✓ Currículum guardado. Tus demás datos no se han perdido; recuerda guardarlos abajo.';
+        })
+        .catch(function () { msg.className = 'error-txt'; msg.textContent = 'No se pudo subir. Revisa tu conexión e inténtalo otra vez.'; });
+    });
+  })();
+  </script>
 </section>`
   });
 }

@@ -8,12 +8,15 @@ Plataforma de reclutamiento y colocación laboral para República Dominicana.
 - Registro con usuario y contraseña.
 - Formulario de perfil: datos de contacto, área (oficio, nivel, experiencia, disponibilidad, aspiración salarial),
   valores (responsabilidad, ética, integridad, respeto), fe (opcional), referencia y consentimiento.
+- Campo opcional de **página web o portafolio** para mostrar sus proyectos.
+- **Currículum opcional** (PDF o Word, máx. 2 MB). Se guarda en la base de datos; solo lo ven el candidato y los administradores.
 - Pueden guardar como borrador y enviar cuando esté completo. Ven el estado de su perfil.
 
 **Administración** (`/admin`)
 - Resumen con conteo por estado.
 - Lista de candidatos con filtros (estado, oficio, provincia, búsqueda) y orden por puntaje de valores.
-- Detalle del candidato con puntaje de valores (0–100) e historial.
+- Detalle del candidato con puntaje de valores (0–100), enlace a su web, ver/descargar su CV e historial.
+- En la lista, 📎 indica quién tiene CV y hay filtro «Solo con CV».
 - Acciones: **Aceptar**, **Poner en espera**, **Rechazar**.
 - **Empresas**: crear, editar, activar/desactivar.
 - **Solicitudes** de personal por empresa (puesto, oficio, cantidad, provincia, salario).
@@ -45,7 +48,7 @@ ADMIN_USER=admin ADMIN_PASS=clave1234 npm start
 ```
 
 ## Respaldo y restauración
-- **Descargar:** Panel → Administradores → «Descargar respaldo» (o `/admin/respaldo`). Baja un JSON con todas las tablas.
+- **Descargar:** Panel → Administradores → «Descargar respaldo» (o `/admin/respaldo`). Baja un JSON con todas las tablas (los CV van en base64).
 - **Restaurar** en una base vacía:
   ```bash
   npm install

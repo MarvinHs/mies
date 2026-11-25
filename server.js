@@ -6,6 +6,7 @@ const db = require('./src/db');
 const V = require('./src/views');
 const D = require('./src/data');
 const admin = require('./src/admin');
+const CV = require('./src/cv');
 
 const PORT = process.env.PORT || 3000;
 const COOKIE = 'mies_s';
@@ -90,8 +91,18 @@ function estatico(req, res, ruta) {
 }
 
 /* ---------- perfil ---------- */
-const CAMPOS = ['nombre', 'telefono', 'correo', 'provincia', 'sector', 'oficio', 'oficio_otro', 'nivel', 'experiencia', 'disponibilidad', 'salario', 'titulos', 'resumen',
+const CAMPOS = ['nombre', 'telefono', 'correo', 'provincia', 'sector', 'oficio', 'oficio_otro', 'nivel', 'experiencia', 'disponibilidad', 'salario', 'titulos', 'resumen', 'web',
   ...D.VALORES.flatMap(v => [v.key + '_caso', v.key + '_esc']), ...D.FE.map(f => f.key), 'ref_nombre', 'ref_relacion', 'ref_telefono', 'consentimiento'];
+
+function normalizarWeb(u) {
+  u = (u || '').trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  return u.slice(0, 300);
+}
+function webValida(u) {
+  try { const x = new URL(u); return /^https?:$/.test(x.protocol) && x.hostname.includes('.'); } catch { return false; }
+}
 
 function validar(d) {
   const e = [];
@@ -106,6 +117,7 @@ function validar(d) {
   if (!D.DISPONIBILIDAD.includes(d.disponibilidad)) e.push('Disponibilidad');
   if (!D.SALARIOS.includes(d.salario)) e.push('Aspiración salarial');
   if (!d.resumen) e.push('Breve descripción de tu experiencia');
+  if (d.web && !webValida(d.web)) e.push('Una dirección web válida (o déjala vacía)');
   for (const v of D.VALORES) {
     if (!d[v.key + '_caso'] || !d[v.key + '_esc']) e.push(`Las dos preguntas de ${v.titulo}`);
   }
@@ -117,6 +129,7 @@ function validar(d) {
 async function guardarPerfil(user, body) {
   const d = {};
   for (const c of CAMPOS) d[c] = (body[c] || '').slice(0, 1500);
+  d.web = normalizarWeb(d.web);
   // Solo valores válidos en selects
   const oficios = D.OFICIOS.flatMap(g => g.items);
   if (d.oficio && !oficios.includes(d.oficio)) d.oficio = '';
@@ -181,20 +194,43 @@ async function manejar(req, res) {
     return res.end();
   }
 
+  if (ruta === '/perfil/cv' || ruta === '/perfil/cv/borrar') {
+    if (!user || user.rol === 'admin') return redirigir(res, '/entrar');
+    if (m === 'GET' && ruta === '/perfil/cv') {
+      if (await CV.enviar(res, user.id, url.searchParams.has('descargar'))) return;
+      return redirigir(res, '/perfil');
+    }
+    if (m === 'POST' && ruta === '/perfil/cv/borrar') {
+      await CV.borrar(user.id);
+      const p = await db.one('SELECT id FROM perfiles WHERE usuario_id = ?', [user.id]);
+      if (p) await db.q('INSERT INTO eventos (perfil_id, texto, autor, fecha) VALUES (?,?,?,?)', [p.id, 'El candidato quitó su currículum', user.usuario, ahora()]);
+      return redirigir(res, '/perfil#cv', { msg: 'Currículum eliminado.' });
+    }
+    if (m === 'POST') {
+      const r = await CV.subir(req, user.id);
+      const ajax = req.headers['x-mies'] === '1';
+      if (r.error) return ajax ? enviar(res, 400, JSON.stringify(r), { 'Content-Type': 'application/json' }) : redirigir(res, '/perfil#cv', { tipo: 'error', msg: r.error });
+      const p = await db.one('SELECT id FROM perfiles WHERE usuario_id = ?', [user.id]);
+      if (p) await db.q('INSERT INTO eventos (perfil_id, texto, autor, fecha) VALUES (?,?,?,?)', [p.id, `El candidato subió su currículum (${r.archivo})`, user.usuario, ahora()]);
+      if (ajax) { const i = await CV.info(user.id); return enviar(res, 200, JSON.stringify({ ok: true, archivo: i.archivo, tamano: CV.tamanoTxt(i.tamano) }), { 'Content-Type': 'application/json' }); }
+      return redirigir(res, '/perfil#cv', { msg: 'Currículum subido correctamente.' });
+    }
+  }
+
   if (ruta === '/perfil') {
     if (!user) return redirigir(res, '/entrar');
     if (user.rol === 'admin') return redirigir(res, '/admin');
     if (m === 'GET') {
       const perfil = await db.one('SELECT * FROM perfiles WHERE usuario_id = ?', [user.id]);
       const d = perfil ? JSON.parse(perfil.datos) : {};
-      return enviar(res, 200, V.perfilForm({ user, perfil, d, flash }));
+      return enviar(res, 200, V.perfilForm({ user, perfil, d, flash, cv: await CV.info(user.id) }));
     }
     if (m === 'POST') {
       const b = await leerCuerpo(req);
       const { d, perfil } = await guardarPerfil(user, b);
       if (b.accion === 'enviar') {
         const errores = validar(d);
-        if (errores.length) return enviar(res, 400, V.perfilForm({ user, perfil, d, errores }));
+        if (errores.length) return enviar(res, 400, V.perfilForm({ user, perfil, d, errores, cv: await CV.info(user.id) }));
         if (perfil.estado === 'borrador' || perfil.estado === 'rechazado') {
           await db.q('UPDATE perfiles SET estado = ?, enviado = ? WHERE usuario_id = ?', ['pendiente', ahora(), user.id]);
           await db.q('INSERT INTO eventos (perfil_id, texto, autor, fecha) VALUES (?,?,?,?)', [perfil.id, perfil.estado === 'rechazado' ? 'El candidato actualizó y reenvió su registro' : 'El candidato envió su registro', user.usuario, ahora()]);

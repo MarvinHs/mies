@@ -4,7 +4,7 @@ let engine = null;
 let pool = null;
 let lite = null;
 
-const TABLAS = (pk) => [
+const TABLAS = (pk, blob) => [
   `CREATE TABLE IF NOT EXISTS usuarios (
     id ${pk}, usuario TEXT UNIQUE NOT NULL, hash TEXT NOT NULL,
     rol TEXT NOT NULL DEFAULT 'candidato', creado TEXT NOT NULL)`,
@@ -25,7 +25,10 @@ const TABLAS = (pk) => [
     id ${pk}, perfil_id INTEGER NOT NULL, empresa_id INTEGER NOT NULL, solicitud_id INTEGER,
     puesto TEXT, estado TEXT NOT NULL DEFAULT 'propuesto', nota TEXT, creado TEXT NOT NULL, actualizado TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS eventos (
-    id ${pk}, perfil_id INTEGER NOT NULL, texto TEXT NOT NULL, autor TEXT, fecha TEXT NOT NULL)`
+    id ${pk}, perfil_id INTEGER NOT NULL, texto TEXT NOT NULL, autor TEXT, fecha TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS cvs (
+    id ${pk}, usuario_id INTEGER UNIQUE NOT NULL, archivo TEXT NOT NULL, tipo TEXT NOT NULL,
+    tamano INTEGER NOT NULL, contenido ${blob} NOT NULL, subido TEXT NOT NULL)`
 ];
 
 async function init() {
@@ -35,12 +38,12 @@ async function init() {
     const url = process.env.DATABASE_URL;
     const needSsl = process.env.PGSSL === '1' || /\.render\.com|sslmode=require/.test(url);
     pool = new Pool({ connectionString: url, ssl: needSsl ? { rejectUnauthorized: false } : false, max: 5 });
-    for (const sql of TABLAS('SERIAL PRIMARY KEY')) await pool.query(sql);
+    for (const sql of TABLAS('SERIAL PRIMARY KEY', 'BYTEA')) await pool.query(sql);
   } else {
     engine = 'sqlite';
     const { DatabaseSync } = require('node:sqlite');
     lite = new DatabaseSync(process.env.SQLITE_FILE || 'mies-local.db');
-    for (const sql of TABLAS('INTEGER PRIMARY KEY AUTOINCREMENT')) lite.exec(sql);
+    for (const sql of TABLAS('INTEGER PRIMARY KEY AUTOINCREMENT', 'BLOB')) lite.exec(sql);
   }
   console.log('Base de datos lista:', engine);
 }

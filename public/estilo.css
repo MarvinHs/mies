@@ -120,7 +120,7 @@ main > .flash { width: calc(100% - 40px); }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .tabs a { padding: 6px 12px; border-radius: 20px; background: var(--blanco); border: 1px solid var(--linea); text-decoration: none; color: var(--suave); font-size: .9rem; }
 .tabs a.act { background: var(--oliva); color: #fff; border-color: var(--oliva); }
-.filtros { display: grid; grid-template-columns: 2fr 1.3fr 1.2fr 1.2fr auto; gap: 8px; align-items: center; }
+.filtros { display: grid; grid-template-columns: 2fr 1.3fr 1.2fr 1.2fr auto auto; gap: 8px; align-items: center; }
 .filtros input, .filtros select { margin: 0; }
 .tabla-wrap { overflow-x: auto; }
 .tabla { width: 100%; border-collapse: collapse; background: var(--blanco); border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; font-size: .94rem; }
@@ -171,3 +171,13 @@ tr.inactiva { opacity: .55; }
   .nav-link { padding: 6px 8px; font-size: .88rem; }
   .barra-acciones .btn { flex: 1; }
 }
+
+/* currículum */
+.cv-acciones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cv-elegir { position: relative; overflow: hidden; margin: 0; }
+.cv-elegir input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+.cv-actual { margin-bottom: 10px; word-break: break-all; }
+.error-txt { color: var(--rojo); font-size: .9rem; margin: 8px 0 0; }
+.ok-txt { color: var(--verde); font-size: .9rem; margin: 8px 0 0; }
+.clip { margin-left: 4px; }
+.filtro-cv { margin: 0; white-space: nowrap; font-size: .9rem; }

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const db = require(path.join(__dirname, '..', 'src', 'db'));
 
-const ORDEN = ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos'];
+const ORDEN = ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs'];
 
 (async () => {
   const archivo = process.argv[2];
@@ -19,6 +19,7 @@ const ORDEN = ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones'
   for (const t of ORDEN) {
     const filas = (datos.tablas && datos.tablas[t]) || [];
     for (const f of filas) {
+      if (t === 'cvs' && typeof f.contenido === 'string') f.contenido = Buffer.from(f.contenido, 'base64');
       const cols = Object.keys(f);
       await db.q(`INSERT INTO ${t} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map(c => f[c]));
     }

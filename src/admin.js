@@ -1,6 +1,7 @@
 const db = require('./db');
 const D = require('./data');
 const V = require('./views');
+const CV = require('./cv');
 const { h, fecha, fechaHora, badge, layout } = V;
 
 const lay = (o) => layout({ ...o, admin: true });
@@ -32,21 +33,24 @@ async function resumen(user, flash) {
 
 function tablaPerfiles(rows, conEstado = true) {
   return `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Nombre</th><th>Oficio</th><th>Provincia</th>${conEstado ? '<th>Exp.</th>' : ''}<th>Valores</th>${conEstado ? '<th>Estado</th>' : ''}<th>Enviado</th></tr></thead><tbody>
-  ${rows.map(r => `<tr onclick="location='/admin/candidatos/${r.id}'"><td><a href="/admin/candidatos/${r.id}">${h(r.nombre || '(sin nombre)')}</a></td><td>${h(r.oficio || '—')}</td><td>${h(r.provincia || '—')}</td>${conEstado ? `<td>${r.experiencia ?? '—'}</td>` : ''}<td>${puntajeChip(r.puntaje)}</td>${conEstado ? `<td>${badge(r.estado)}</td>` : ''}<td>${fecha(r.enviado)}</td></tr>`).join('')}
+  ${rows.map(r => `<tr onclick="location='/admin/candidatos/${r.id}'"><td><a href="/admin/candidatos/${r.id}">${h(r.nombre || '(sin nombre)')}</a>${Number(r.tiene_cv) ? ' <span class="clip" title="Tiene currículum">📎</span>' : ''}</td><td>${h(r.oficio || '—')}</td><td>${h(r.provincia || '—')}</td>${conEstado ? `<td>${r.experiencia ?? '—'}</td>` : ''}<td>${puntajeChip(r.puntaje)}</td>${conEstado ? `<td>${badge(r.estado)}</td>` : ''}<td>${fecha(r.enviado)}</td></tr>`).join('')}
   </tbody></table></div>`;
 }
 const puntajeChip = (p) => p == null ? '<span class="muted">—</span>' : `<span class="pts ${p >= 80 ? 'alto' : p >= 60 ? 'medio' : 'bajo'}">${p}</span>`;
 
 /* ---------- Lista de candidatos ---------- */
 async function candidatos(user, url, flash) {
-  const f = { estado: url.searchParams.get('estado') || '', oficio: url.searchParams.get('oficio') || '', provincia: url.searchParams.get('provincia') || '', q: url.searchParams.get('q') || '', orden: url.searchParams.get('orden') || 'reciente' };
+  const f = { estado: url.searchParams.get('estado') || '', oficio: url.searchParams.get('oficio') || '', provincia: url.searchParams.get('provincia') || '', q: url.searchParams.get('q') || '', orden: url.searchParams.get('orden') || 'reciente', cv: url.searchParams.get('cv') || '' };
   const where = [], p = [];
   if (f.estado) { where.push('estado = ?'); p.push(f.estado); } else { where.push("estado <> 'borrador'"); }
   if (f.oficio) { where.push('oficio LIKE ?'); p.push(f.oficio + '%'); }
   if (f.provincia) { where.push('provincia = ?'); p.push(f.provincia); }
+  if (f.cv === '1') where.push('c.usuario_id IS NOT NULL');
   if (f.q) { where.push('(LOWER(nombre) LIKE ? OR telefono LIKE ? OR LOWER(datos) LIKE ?)'); const s = '%' + f.q.toLowerCase() + '%'; p.push(s, s, s); }
-  const orden = { reciente: 'enviado DESC', puntaje: 'puntaje DESC', experiencia: 'experiencia DESC', nombre: 'nombre ASC' }[f.orden] || 'enviado DESC';
-  const rows = await db.q(`SELECT id, nombre, oficio, provincia, experiencia, puntaje, estado, enviado FROM perfiles WHERE ${where.join(' AND ')} ORDER BY ${orden} LIMIT 500`, p);
+  const orden = { reciente: 'enviado DESC', puntaje: 'puntaje DESC NULLS LAST', experiencia: 'experiencia DESC NULLS LAST', nombre: 'nombre ASC' }[f.orden] || 'enviado DESC';
+  const rows = await db.q(`SELECT p.id, p.nombre, p.oficio, p.provincia, p.experiencia, p.puntaje, p.estado, p.enviado,
+    CASE WHEN c.usuario_id IS NULL THEN 0 ELSE 1 END AS tiene_cv
+    FROM perfiles p LEFT JOIN cvs c ON c.usuario_id = p.usuario_id WHERE ${where.join(' AND ')} ORDER BY ${orden} LIMIT 500`, p);
   const borradores = await db.one("SELECT COUNT(*) AS n FROM perfiles WHERE estado = 'borrador'");
   const oficios = D.OFICIOS.flatMap(g => g.items);
   const tabs = [['', 'Todos los enviados'], ...Object.entries(D.ESTADOS).filter(([k]) => k !== 'borrador').map(([k, e]) => [k, e.t])]
@@ -61,6 +65,7 @@ async function candidatos(user, url, flash) {
       ${V.sel('oficio', oficios, f.oficio, 'Todos los oficios')}
       ${V.sel('provincia', D.PROVINCIAS, f.provincia, 'Todas las provincias')}
       <select name="orden">${[['reciente', 'Más recientes'], ['puntaje', 'Mejor puntaje de valores'], ['experiencia', 'Más experiencia'], ['nombre', 'Nombre']].map(([v, t]) => `<option value="${v}"${f.orden === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <label class="check filtro-cv"><input type="checkbox" name="cv" value="1"${f.cv === '1' ? ' checked' : ''}> <span>Solo con CV</span></label>
       <button class="btn btn-peq">Filtrar</button>
     </form>
     <p class="muted">${rows.length} resultado(s). ${num(borradores.n)} perfil(es) aún en borrador (no enviados).</p>
@@ -77,6 +82,7 @@ async function detalle(user, id, flash) {
   const pts = D.puntajes(d);
   const asig = await db.q('SELECT a.*, e.nombre AS empresa, s.puesto AS sol_puesto FROM asignaciones a JOIN empresas e ON e.id = a.empresa_id LEFT JOIN solicitudes s ON s.id = a.solicitud_id WHERE a.perfil_id = ? ORDER BY a.id DESC', [id]);
   const eventos = await db.q('SELECT * FROM eventos WHERE perfil_id = ? ORDER BY id DESC LIMIT 50', [id]);
+  const cv = await CV.info(p.usuario_id);
   const empresas = await db.q('SELECT id, nombre FROM empresas WHERE activa = 1 ORDER BY nombre');
   const sols = await db.q("SELECT s.id, s.puesto, s.oficio, e.nombre AS empresa, s.empresa_id FROM solicitudes s JOIN empresas e ON e.id = s.empresa_id WHERE s.estado = 'abierta' ORDER BY e.nombre, s.puesto");
   const fila = (t, v) => `<div class="dato"><span>${t}</span><b>${h(v || '—')}</b></div>`;
@@ -94,7 +100,7 @@ async function detalle(user, id, flash) {
   return lay({
     user, flash, title: p.nombre || 'Candidato', body: `<section class="wrap">${subnav('/admin/candidatos')}
   <p><a href="/admin/candidatos">← Volver a candidatos</a></p>
-  <div class="cab-detalle"><div><h1>${h(p.nombre || '(sin nombre)')}</h1><p class="muted">${h(p.oficio || '')} · ${h(p.provincia || '')} · usuario <code>${h(p.usuario)}</code></p></div>
+  <div class="cab-detalle"><div><h1>${h(p.nombre || '(sin nombre)')}</h1><p class="muted">${[p.oficio, p.provincia].filter(Boolean).map(h).join(' · ')}${p.oficio || p.provincia ? ' · ' : ''}usuario <code>${h(p.usuario)}</code></p></div>
     <div class="cab-der">${badge(p.estado)}<div class="pts-grande">${pts.total ?? '—'}<small>puntaje de valores</small></div></div></div>
 
   <div class="grid-det">
@@ -107,6 +113,12 @@ async function detalle(user, id, flash) {
       ${fila('Oficio o profesión', p.oficio)}${fila('Nivel educativo', d.nivel)}${fila('Años de experiencia', d.experiencia)}${fila('Disponibilidad', d.disponibilidad)}${fila('Aspiración salarial', d.salario)}</div>
       ${fila('Títulos, certificaciones y cursos', d.titulos)}
       <div class="dato"><span>Experiencia</span><p class="texto">${h(d.resumen || '—')}</p></div>
+      <div class="dato"><span>Página web o portafolio</span>${d.web ? `<b><a href="${h(d.web)}" target="_blank" rel="noopener noreferrer nofollow">${h(d.web.replace(/^https?:\/\//, ''))} ↗</a></b>` : '<b>—</b>'}</div>
+    </div>
+    <div class="panel"><h2>Currículum</h2>
+      ${cv ? `<p>📄 <b>${h(cv.archivo)}</b> <span class="muted peq">· ${CV.tamanoTxt(cv.tamano)} · subido ${fecha(cv.subido)}</span></p>
+        <div class="botones">${cv.tipo === 'application/pdf' ? `<a class="btn btn-peq" href="/admin/candidatos/${p.id}/cv" target="_blank" rel="noopener">Ver CV</a>` : ''}<a class="btn btn-peq btn-sec" href="/admin/candidatos/${p.id}/cv?descargar=1">Descargar</a></div>`
+      : '<p class="muted">El candidato no ha subido currículum.</p>'}
     </div>
     <div class="panel"><h2>Valores</h2><div class="val-grid">${valoresHtml}</div></div>
     <div class="panel"><h2>Fe <span class="opc-tag">Opcional</span></h2><div class="datos">${D.FE.map(f => fila(f.t, d[f.key] || 'Prefirió no responder')).join('')}</div></div>
@@ -244,7 +256,7 @@ async function usuarios(user, flash) {
     <div class="grid-det"><div>
       <table class="tabla"><thead><tr><th>Usuario</th><th>Creado</th></tr></thead><tbody>${rows.map(r => `<tr><td>${h(r.usuario)}${r.id === user.id ? ' <span class="muted">(tú)</span>' : ''}</td><td>${fecha(r.creado)}</td></tr>`).join('')}</tbody></table>
       <p class="muted">${num(cand.n)} cuenta(s) de candidatos registradas.</p>
-      <div class="panel mt"><h2>Respaldo de datos</h2><p class="muted">Descarga una copia de toda la información (usuarios, perfiles, empresas, solicitudes, colocaciones e historial) en un archivo JSON. Guárdalo en un lugar seguro: contiene datos personales.</p>
+      <div class="panel mt"><h2>Respaldo de datos</h2><p class="muted">Descarga una copia de toda la información (usuarios, perfiles, currículums, empresas, solicitudes, colocaciones e historial) en un archivo JSON. Guárdalo en un lugar seguro: contiene datos personales.</p>
       <a class="btn" href="/admin/respaldo">Descargar respaldo</a></div>
     </div><aside>
       <div class="panel"><h2>Nuevo administrador</h2><form method="post" action="/admin/usuarios">
@@ -271,6 +283,11 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
     const id = parseInt(seg[2], 10);
     if (!id) return false;
     if (seg.length === 3 && m === 'GET') { const html = await detalle(user, id, flash); return html ? ok(html) : false; }
+    if (seg[3] === 'cv' && m === 'GET') {
+      const p = await db.one('SELECT usuario_id FROM perfiles WHERE id = ?', [id]);
+      if (p && await CV.enviar(res, p.usuario_id, url.searchParams.has('descargar'))) return;
+      return redirigir(res, `/admin/candidatos/${id}`, { tipo: 'error', msg: 'Este candidato no tiene currículum.' });
+    }
     if (seg[3] === 'estado' && m === 'POST') {
       if (!['aceptado', 'en_espera', 'rechazado'].includes(b.estado)) return redirigir(res, `/admin/candidatos/${id}`);
       await db.q('UPDATE perfiles SET estado = ?, nota_admin = ? WHERE id = ?', [b.estado, b.nota || null, id]);
@@ -348,9 +365,11 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
   }
   if (seg[1] === 'respaldo' && m === 'GET') {
     const datos = { generado: new Date().toISOString(), version: 1, tablas: {} };
-    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos']) {
+    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs']) {
       datos.tablas[t] = await db.q(`SELECT * FROM ${t} ORDER BY id`);
     }
+    // Los archivos del CV van en base64 dentro del JSON
+    datos.tablas.cvs = datos.tablas.cvs.map(c => ({ ...c, contenido: Buffer.from(c.contenido).toString('base64') }));
     const dia = new Date().toISOString().slice(0, 10);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Disposition': `attachment; filename="mies-respaldo-${dia}.json"`, 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(datos, null, 2));

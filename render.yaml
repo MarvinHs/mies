@@ -1,0 +1,29 @@
+databases:
+  - name: mies-db
+    plan: free
+    region: virginia
+    postgresMajorVersion: "17"
+    databaseName: mies_db
+    user: mies_db_user
+
+services:
+  - type: web
+    name: mies
+    runtime: node
+    plan: free
+    region: virginia
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /salud
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mies-db
+          property: connectionString
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASS
+        sync: false
+      - key: NODE_VERSION
+        value: "22"

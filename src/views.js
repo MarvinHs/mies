@@ -31,7 +31,7 @@ function layout({ title, user, body, flash, admin = false }) {
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/estilo.css?v=3"></head>
+<link rel="stylesheet" href="/static/estilo.css?v=5"></head>
 <body class="${admin ? 'es-admin' : ''}">
 <header class="top"><div class="wrap top-in">
   <a href="/" class="marca">${LOGO}<span>Mies</span></a>
@@ -270,7 +270,7 @@ function contacto({ user, enviado = false, errores = {}, datos = {} }) {
       <label>Tu nombre<input name="nombre" value="${h(datos.nombre)}" maxlength="120" autocomplete="name" required>${err('nombre')}</label>
       <label>Tu correo<input type="email" name="correo" value="${h(datos.correo)}" maxlength="160" autocomplete="email" required>${err('correo')}</label>
       <label>Mensaje<textarea name="mensaje" rows="6" maxlength="3000" required placeholder="Cuéntanos en qué te podemos ayudar. Si eres empresa, dinos el puesto, la cantidad y la zona.">${h(datos.mensaje)}</textarea>${err('mensaje')}</label>
-      <div class="trampa" aria-hidden="true"><label>No llenar<input name="sitio" tabindex="-1" autocomplete="off"></label></div>
+      <div class="trampa" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden"><label>Deje este campo vacío<input name="sitio" tabindex="-1" autocomplete="off"></label></div>
       <button class="btn ancho">Enviar mensaje</button>
     </form>`;
   return layout({

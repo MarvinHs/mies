@@ -8,6 +8,7 @@ const D = require('./src/data');
 const admin = require('./src/admin');
 const CV = require('./src/cv');
 const Contacto = require('./src/contacto');
+const P = require('./src/paginas');
 
 const PORT = process.env.PORT || 3000;
 const COOKIE = 'mies_s';
@@ -27,6 +28,25 @@ function verificarClave(clave, guardado) {
   return orig.length === calc.length && crypto.timingSafeEqual(orig, calc);
 }
 const ahora = () => new Date().toISOString();
+const telNorm = (t) => { const d = String(t || '').replace(/\D/g, ''); return d.length >= 10 ? d.slice(-10) : null; };
+const intentosRec = new Map();
+function limiteRecuperar(ip) {
+  const t = Date.now(); const l = (intentosRec.get(ip) || []).filter(x => t - x < 3600e3); l.push(t); intentosRec.set(ip, l); return l.length > 5;
+}
+const ipDe = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+async function borrarCuenta(usuarioId) {
+  const p = await db.one('SELECT id FROM perfiles WHERE usuario_id = ?', [usuarioId]);
+  if (p) {
+    await db.q('DELETE FROM asignaciones WHERE perfil_id = ?', [p.id]);
+    await db.q('DELETE FROM eventos WHERE perfil_id = ?', [p.id]);
+    await db.q('DELETE FROM perfiles WHERE id = ?', [p.id]);
+  }
+  await db.q('DELETE FROM cvs WHERE usuario_id = ?', [usuarioId]);
+  await db.q('DELETE FROM recuperaciones WHERE usuario_id = ?', [usuarioId]);
+  await db.q('DELETE FROM sesiones WHERE usuario_id = ?', [usuarioId]);
+  await db.q('DELETE FROM usuarios WHERE id = ?', [usuarioId]);
+}
 
 function cookies(req) {
   const out = {};
@@ -66,7 +86,7 @@ async function usuarioActual(req) {
   const t = cookies(req)[COOKIE];
   if (!t) return null;
   const row = await db.one(
-    'SELECT u.id, u.usuario, u.rol, s.expira FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id WHERE s.token = ?', [t]);
+    'SELECT u.id, u.usuario, u.rol, u.debe_cambiar, s.expira FROM sesiones s JOIN usuarios u ON u.id = s.usuario_id WHERE s.token = ?', [t]);
   if (!row || Number(row.expira) < Date.now()) return null;
   return row;
 }
@@ -139,12 +159,12 @@ async function guardarPerfil(user, body) {
   const actual = await db.one('SELECT * FROM perfiles WHERE usuario_id = ?', [user.id]);
   const oficioMostrar = d.oficio === 'Otro' && d.oficio_otro ? `Otro: ${d.oficio_otro}` : d.oficio;
   const exp = d.experiencia === '' || isNaN(+d.experiencia) ? null : Math.max(0, Math.min(60, parseInt(d.experiencia, 10)));
-  const vals = [JSON.stringify(d), d.nombre, d.telefono, d.provincia, oficioMostrar, exp, pts.total, ahora()];
+  const vals = [JSON.stringify(d), d.nombre, d.telefono, d.provincia, oficioMostrar, exp, pts.total, ahora(), telNorm(d.telefono)];
   if (actual) {
-    await db.q('UPDATE perfiles SET datos=?, nombre=?, telefono=?, provincia=?, oficio=?, experiencia=?, puntaje=?, actualizado=? WHERE id=?', [...vals, actual.id]);
+    await db.q('UPDATE perfiles SET datos=?, nombre=?, telefono=?, provincia=?, oficio=?, experiencia=?, puntaje=?, actualizado=?, tel_norm=? WHERE id=?', [...vals, actual.id]);
     return { d, perfil: { ...actual } };
   }
-  const [row] = await db.q('INSERT INTO perfiles (datos, nombre, telefono, provincia, oficio, experiencia, puntaje, actualizado, usuario_id, estado) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING *', [...vals, user.id, 'borrador']);
+  const [row] = await db.q('INSERT INTO perfiles (datos, nombre, telefono, provincia, oficio, experiencia, puntaje, actualizado, tel_norm, usuario_id, estado) VALUES (?,?,?,?,?,?,?,?,?,?,?) RETURNING *', [...vals, user.id, 'borrador']);
   return { d, perfil: row };
 }
 
@@ -163,6 +183,58 @@ async function manejar(req, res) {
   if (ck.mies_f) { try { flash = JSON.parse(ck.mies_f); } catch { } res.setHeader('Set-Cookie', 'mies_f=; Path=/; Max-Age=0'); }
 
   if (ruta === '/' && m === 'GET') return enviar(res, 200, V.inicio(user));
+
+  if (ruta === '/robots.txt') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(`User-agent: *\nDisallow: /admin\nDisallow: /perfil\nDisallow: /cuenta\nAllow: /\n`);
+  }
+  if (ruta === '/privacidad' && m === 'GET') return enviar(res, 200, P.privacidad(user));
+
+  if (ruta === '/recuperar') {
+    if (user) return redirigir(res, '/cuenta');
+    if (m === 'GET') return enviar(res, 200, P.recuperar({ enviado: url.searchParams.has('ok') }));
+    if (m === 'POST') {
+      const b = await leerCuerpo(req);
+      if (b.sitio) return redirigir(res, '/recuperar?ok=1');
+      const usuario = (b.usuario || '').toLowerCase().slice(0, 40);
+      const tn = telNorm(b.telefono);
+      if (!usuario || !tn) return enviar(res, 400, P.recuperar({ error: 'Escribe tu usuario y un teléfono de 10 dígitos.', datos: b }));
+      if (limiteRecuperar(ipDe(req))) return enviar(res, 429, P.recuperar({ error: 'Has hecho varias solicitudes seguidas. Intenta más tarde o escríbenos por contacto.', datos: b }));
+      const u = await db.one("SELECT u.id, p.tel_norm FROM usuarios u LEFT JOIN perfiles p ON p.usuario_id = u.id WHERE u.usuario = ? AND u.rol = 'candidato'", [usuario]);
+      await db.q('INSERT INTO recuperaciones (usuario_id, usuario, telefono, coincide, creado) VALUES (?,?,?,?,?)', [u ? u.id : null, usuario, b.telefono.slice(0, 30), u && u.tel_norm === tn ? 1 : 0, ahora()]);
+      return redirigir(res, '/recuperar?ok=1');
+    }
+  }
+
+  if (ruta === '/cuenta' || ruta.startsWith('/cuenta/')) {
+    if (!user) return redirigir(res, '/entrar');
+    if (user.rol === 'admin' && !Number(user.debe_cambiar)) return redirigir(res, '/admin/usuarios');
+    const debe = Number(user.debe_cambiar) === 1;
+    if (ruta === '/cuenta' && m === 'GET') return enviar(res, 200, P.cuenta({ user, flash, debeCambiar: debe }));
+    if (ruta === '/cuenta/clave' && m === 'POST') {
+      const b = await leerCuerpo(req);
+      const u = await db.one('SELECT hash FROM usuarios WHERE id = ?', [user.id]);
+      let error = null;
+      if (!debe && !verificarClave(b.actual || '', u.hash)) error = 'La contraseña actual no es correcta.';
+      else if ((b.clave || '').length < 6) error = 'La nueva contraseña debe tener al menos 6 caracteres.';
+      else if (b.clave !== b.clave2) error = 'Las contraseñas nuevas no coinciden.';
+      if (error) return enviar(res, 400, P.cuenta({ user, error, debeCambiar: debe }));
+      await db.q('UPDATE usuarios SET hash = ?, debe_cambiar = 0 WHERE id = ?', [hashClave(b.clave), user.id]);
+      await db.q('DELETE FROM sesiones WHERE usuario_id = ? AND token <> ?', [user.id, ck[COOKIE]]);
+      return redirigir(res, user.rol === 'admin' ? '/admin' : (debe ? '/perfil' : '/cuenta'), { msg: 'Contraseña actualizada.' });
+    }
+    if (ruta === '/cuenta/eliminar' && m === 'POST' && user.rol !== 'admin') {
+      const b = await leerCuerpo(req);
+      const u = await db.one('SELECT hash FROM usuarios WHERE id = ?', [user.id]);
+      if (!verificarClave(b.clave || '', u.hash)) return enviar(res, 400, P.cuenta({ user, error: 'La contraseña no es correcta. Tu cuenta no se eliminó.', debeCambiar: debe }));
+      await borrarCuenta(user.id);
+      res.writeHead(303, { Location: '/', 'Set-Cookie': [`${COOKIE}=; Path=/; Max-Age=0`, `mies_f=${encodeURIComponent(JSON.stringify({ msg: 'Tu cuenta y todos tus datos fueron eliminados.' }))}; Path=/; Max-Age=30; SameSite=Lax; HttpOnly`] });
+      return res.end();
+    }
+  }
+
+  // Si entró con contraseña temporal, debe cambiarla antes de seguir
+  if (user && Number(user.debe_cambiar) && !ruta.startsWith('/static/') && ruta !== '/salir') return redirigir(res, '/cuenta');
 
   if (ruta === '/contacto') {
     if (m === 'GET') return enviar(res, 200, V.contacto({ user, enviado: url.searchParams.has('enviado') }));
@@ -196,7 +268,7 @@ async function manejar(req, res) {
       }
       const u = await db.one('SELECT * FROM usuarios WHERE usuario = ?', [usuario]);
       if (!u || !verificarClave(b.clave || '', u.hash)) return enviar(res, 401, V.authForm({ user: null, modo, error: 'Usuario o contraseña incorrectos.', usuario }));
-      return iniciarSesion(req, res, u.id, u.rol === 'admin' ? '/admin' : '/perfil');
+      return iniciarSesion(req, res, u.id, Number(u.debe_cambiar) ? '/cuenta' : u.rol === 'admin' ? '/admin' : '/perfil');
     }
   }
 
@@ -242,6 +314,10 @@ async function manejar(req, res) {
       const { d, perfil } = await guardarPerfil(user, b);
       if (b.accion === 'enviar') {
         const errores = validar(d);
+        const tn = telNorm(d.telefono);
+        if (tn && await db.one("SELECT id FROM perfiles WHERE tel_norm = ? AND usuario_id <> ? AND estado <> 'borrador'", [tn, user.id])) {
+          errores.push('Este teléfono ya está registrado con otra cuenta. Si es tuya y olvidaste la contraseña, usa «¿Olvidaste tu contraseña?» en la página de entrar.');
+        }
         if (errores.length) return enviar(res, 400, V.perfilForm({ user, perfil, d, errores, cv: await CV.info(user.id) }));
         if (perfil.estado === 'borrador' || perfil.estado === 'rechazado') {
           await db.q('UPDATE perfiles SET estado = ?, enviado = ? WHERE usuario_id = ?', ['pendiente', ahora(), user.id]);
@@ -259,7 +335,7 @@ async function manejar(req, res) {
     if (!user) return redirigir(res, '/entrar');
     if (user.rol !== 'admin') return enviar(res, 403, V.layout({ user, title: 'Sin acceso', body: '<section class="wrap estrecho"><h1>Sin acceso</h1><p>Esta sección es solo para administradores.</p></section>' }));
     const b = m === 'POST' ? await leerCuerpo(req) : {};
-    const r = await admin.manejar({ req, res, ruta, m, url, user, body: b, flash, redirigir, enviar, hashClave, ahora });
+    const r = await admin.manejar({ req, res, ruta, m, url, user, body: b, flash, redirigir, enviar, hashClave, ahora, borrarCuenta });
     if (r !== false) return;
   }
 

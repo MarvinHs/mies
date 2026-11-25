@@ -2,6 +2,8 @@ const db = require('./db');
 const D = require('./data');
 const V = require('./views');
 const CV = require('./cv');
+const P = require('./paginas');
+const crypto = require('node:crypto');
 const { h, fecha, fechaHora, badge, layout } = V;
 
 const lay = (o) => layout({ ...o, admin: true });
@@ -17,6 +19,7 @@ async function resumen(user, flash) {
   const emp = await db.one('SELECT COUNT(*) AS n FROM empresas');
   const sol = await db.one("SELECT COUNT(*) AS n FROM solicitudes WHERE estado = 'abierta'");
   const msj = await db.one('SELECT COUNT(*) AS n FROM mensajes WHERE leido = 0');
+  const rec = await db.one('SELECT COUNT(*) AS n FROM recuperaciones WHERE atendida = 0');
   const ult = await db.q("SELECT id, nombre, oficio, provincia, enviado, puntaje FROM perfiles WHERE estado = 'pendiente' ORDER BY enviado DESC LIMIT 8");
   const tiles = Object.entries(D.ESTADOS).map(([k, e]) => `<a class="tile t-${e.c}" href="/admin/candidatos?estado=${k}"><b>${cuentas[k] || 0}</b><span>${h(e.t)}</span></a>`).join('');
   return lay({
@@ -26,6 +29,7 @@ async function resumen(user, flash) {
       <a class="tile t-neutro" href="/admin/empresas"><b>${num(emp.n)}</b><span>Empresas</span></a>
       <a class="tile t-neutro" href="/admin/solicitudes"><b>${num(sol.n)}</b><span>Solicitudes abiertas</span></a>
       <a class="tile ${num(msj.n) ? 't-oro' : 't-neutro'}" href="/admin/mensajes"><b>${num(msj.n)}</b><span>Mensajes sin leer</span></a>
+      ${num(rec.n) ? `<a class="tile t-rojo" href="/admin/mensajes"><b>${num(rec.n)}</b><span>Olvidaron su contraseña</span></a>` : ''}
     </div>
     <h2>Pendientes de revisión</h2>
     ${ult.length ? tablaPerfiles(ult, false) : '<p class="vacio">No hay registros pendientes. 🎉</p>'}
@@ -76,6 +80,26 @@ async function candidatos(user, url, flash) {
   });
 }
 
+/* ---------- WhatsApp ---------- */
+const waNumero = (tel) => { const d = String(tel || '').replace(/\D/g, ''); return d.length >= 10 ? '1' + d.slice(-10) : null; };
+const waLink = (tel, texto) => { const n = waNumero(tel); return n ? `https://wa.me/${n}?text=${encodeURIComponent(texto)}` : null; };
+function plantillas(p, d, asig) {
+  const nombre = (d.nombre || p.nombre || '').split(' ')[0] || '';
+  const sitio = P.SITIO();
+  const emp = asig ? asig.empresa : '[empresa]';
+  const puesto = asig ? (asig.puesto || asig.sol_puesto || '[puesto]') : '[puesto]';
+  return [
+    ['aceptado', 'Perfil aprobado', `Hola ${nombre}, te saluda el equipo de Mies. ¡Buenas noticias! Tu perfil fue aprobado y ya forma parte de nuestro banco de talento. Te contactaremos cuando una empresa busque a alguien como tú.`],
+    ['en_espera', 'Perfil en espera', `Hola ${nombre}, te saluda el equipo de Mies. Recibimos tu registro y por ahora lo tenemos en espera. Te escribiremos en cuanto surja una oportunidad en tu área.`],
+    ['rechazado', 'Perfil no aprobado', `Hola ${nombre}, gracias por registrarte en Mies. Por ahora tu perfil no fue aprobado. Puedes actualizar tus datos en ${sitio}/perfil y volver a enviarlo.`],
+    ['propuesto', 'Propuesto a empresa', `Hola ${nombre}, te saluda el equipo de Mies. Te propusimos para el puesto de ${puesto} en ${emp}. ¿Sigues disponible? Respóndenos este mensaje para coordinar.`],
+    ['entrevista', 'Entrevista', `Hola ${nombre}, te saluda el equipo de Mies. ${emp} quiere entrevistarte para el puesto de ${puesto}. Respóndenos para coordinar el día y la hora.`],
+    ['contratado', 'Contratado', `¡Felicidades ${nombre}! Fuiste seleccionado para el puesto de ${puesto} en ${emp}. Todo el equipo de Mies te desea muchos éxitos.`],
+    ['completar', 'Completar perfil', `Hola ${nombre}, te saluda el equipo de Mies. Vimos que tu perfil aún no está completo. Entra a ${sitio}/perfil, termina de llenarlo y pulsa «Enviar registro» para que podamos presentarte a empresas.`],
+    ['libre', 'Mensaje libre', `Hola ${nombre}, te saluda el equipo de Mies. `]
+  ];
+}
+
 /* ---------- Detalle de candidato ---------- */
 async function detalle(user, id, flash) {
   const p = await db.one('SELECT p.*, u.usuario FROM perfiles p JOIN usuarios u ON u.id = p.usuario_id WHERE p.id = ?', [id]);
@@ -85,6 +109,11 @@ async function detalle(user, id, flash) {
   const asig = await db.q('SELECT a.*, e.nombre AS empresa, s.puesto AS sol_puesto FROM asignaciones a JOIN empresas e ON e.id = a.empresa_id LEFT JOIN solicitudes s ON s.id = a.solicitud_id WHERE a.perfil_id = ? ORDER BY a.id DESC', [id]);
   const eventos = await db.q('SELECT * FROM eventos WHERE perfil_id = ? ORDER BY id DESC LIMIT 50', [id]);
   const cv = await CV.info(p.usuario_id);
+  const duplicados = p.tel_norm ? await db.q('SELECT id, nombre, estado FROM perfiles WHERE tel_norm = ? AND id <> ?', [p.tel_norm, p.id]) : [];
+  const asigUlt = asig[0] || null;
+  const tpls = plantillas(p, d, asigUlt);
+  const sugerida = asigUlt && ['propuesto', 'entrevista', 'contratado'].includes(asigUlt.estado) ? asigUlt.estado : (p.estado === 'borrador' ? 'completar' : (['aceptado', 'en_espera', 'rechazado'].includes(p.estado) ? p.estado : 'libre'));
+  const telWa = waNumero(d.telefono);
   const empresas = await db.q('SELECT id, nombre FROM empresas WHERE activa = 1 ORDER BY nombre');
   const sols = await db.q("SELECT s.id, s.puesto, s.oficio, e.nombre AS empresa, s.empresa_id FROM solicitudes s JOIN empresas e ON e.id = s.empresa_id WHERE s.estado = 'abierta' ORDER BY e.nombre, s.puesto");
   const fila = (t, v) => `<div class="dato"><span>${t}</span><b>${h(v || '—')}</b></div>`;
@@ -105,6 +134,8 @@ async function detalle(user, id, flash) {
   <div class="cab-detalle"><div><h1>${h(p.nombre || '(sin nombre)')}</h1><p class="muted">${[p.oficio, p.provincia].filter(Boolean).map(h).join(' · ')}${p.oficio || p.provincia ? ' · ' : ''}usuario <code>${h(p.usuario)}</code></p></div>
     <div class="cab-der">${badge(p.estado)}<div class="pts-grande">${pts.total ?? '—'}<small>puntaje de valores</small></div></div></div>
 
+  ${duplicados.length ? `<div class="alerta">⚠ <b>Posible registro duplicado:</b> este teléfono también aparece en ${duplicados.map(x => `<a href="/admin/candidatos/${x.id}">${h(x.nombre || '(sin nombre)')}</a> (${h((D.ESTADOS[x.estado] || {}).t || x.estado)})`).join(', ')}.</div>` : ''}
+  <div class="botones"><a class="btn btn-peq" href="/admin/candidatos/${p.id}/ficha" target="_blank" rel="noopener">📄 Ficha para empresa (PDF)</a>${cv ? `<a class="btn btn-peq btn-sec" href="/admin/candidatos/${p.id}/cv?descargar=1">Descargar CV</a>` : ''}</div>
   <div class="grid-det">
    <div>
     <div class="panel"><h2>Datos de contacto</h2><div class="datos">
@@ -137,6 +168,15 @@ async function detalle(user, id, flash) {
       ${p.nota_admin ? `<p class="muted peq">Última nota: ${h(p.nota_admin)}</p>` : ''}
     </div>
 
+    <div class="panel wa-panel"><h2>Avisar por WhatsApp</h2>
+      ${telWa ? `<label>Mensaje<select id="wa-tpl">${tpls.map(([k, t]) => `<option value="${k}"${k === sugerida ? ' selected' : ''}>${h(t)}</option>`).join('')}</select></label>
+      <textarea id="wa-txt" rows="5">${h((tpls.find(t => t[0] === sugerida) || tpls[0])[2])}</textarea>
+      <a class="btn btn-wa ancho" id="wa-btn" target="_blank" rel="noopener" href="#" style="margin:10px 0 0;text-align:center">Abrir WhatsApp</a>
+      <script>(function(){var T=${JSON.stringify(Object.fromEntries(tpls.map(([k, , t]) => [k, t]))).replace(/</g, '\\u003c')};var s=document.getElementById('wa-tpl'),x=document.getElementById('wa-txt'),b=document.getElementById('wa-btn');
+      function u(){b.href='https://wa.me/${telWa}?text='+encodeURIComponent(x.value);}s.onchange=function(){x.value=T[s.value];u();};x.oninput=u;u();})();</script>`
+      : '<p class="muted">El candidato no tiene un teléfono válido de 10 dígitos.</p>'}
+    </div>
+
     <div class="panel"><h2>${asigActiva ? 'Asignar a otra empresa' : 'Colocar en una empresa'}</h2>
       ${p.estado === 'aceptado' || p.estado === 'colocado' ? (empresas.length ? `
       <form method="post" action="/admin/candidatos/${p.id}/asignar">
@@ -158,6 +198,12 @@ async function detalle(user, id, flash) {
           <select name="estado">${Object.entries(D.ESTADOS_ASIG).map(([k, e]) => `<option value="${k}"${k === a.estado ? ' selected' : ''}>${h(e.t)}</option>`).join('')}</select>
           <button class="btn btn-peq">Actualizar</button></form></div>`).join('') : '<p class="muted">Aún no ha sido asignado a ninguna empresa.</p>'}
       <p class="muted peq">Si marcas «No seleccionado» o «Relación finalizada», el candidato vuelve al mercado laboral (Aceptado · disponible) para recolocarlo.</p>
+    </div>
+
+    <div class="panel"><h2>Cuenta y acceso</h2>
+      <p class="muted peq">Si el candidato olvidó su contraseña, genera una temporal y envíasela por WhatsApp. Al entrar, tendrá que crear una nueva.</p>
+      <form method="post" action="/admin/candidatos/${p.id}/clave" onsubmit="return confirm('¿Generar una contraseña temporal? La actual dejará de funcionar.')"><button class="btn btn-peq btn-sec ancho">Generar contraseña temporal</button></form>
+      <form method="post" action="/admin/candidatos/${p.id}/eliminar" onsubmit="return confirm('¿Eliminar este candidato con su cuenta, perfil, CV e historial? No se puede deshacer.')" style="margin-top:8px"><button class="btn btn-peq btn-sec ancho" style="color:var(--rojo)">Eliminar candidato y sus datos</button></form>
     </div>
 
     <div class="panel"><h2>Historial</h2><ul class="historial">${eventos.map(e => `<li><span class="muted peq">${fechaHora(e.fecha)} · ${h(e.autor || '')}</span><br>${h(e.texto)}</li>`).join('') || '<li class="muted">Sin movimientos</li>'}</ul></div>
@@ -279,10 +325,16 @@ async function mensajes(user, url, flash) {
   const rows = await db.q(`SELECT * FROM mensajes ${filtro === 'nuevos' ? 'WHERE leido = 0' : ''} ORDER BY id DESC LIMIT 300`);
   const nuevos = await db.one('SELECT COUNT(*) AS n FROM mensajes WHERE leido = 0');
   const destino = process.env.CONTACTO_CORREO;
+  const recs = await db.q('SELECT r.*, p.id AS perfil_id, p.nombre FROM recuperaciones r LEFT JOIN perfiles p ON p.usuario_id = r.usuario_id WHERE r.atendida = 0 ORDER BY r.id DESC');
   return lay({
     user, flash, title: 'Mensajes', body: `<section class="wrap">${subnav('/admin/mensajes')}
     <h1>Mensajes de contacto</h1>
     <p class="muted">Los mensajes del formulario de contacto se guardan aquí${destino ? ` y se envían a <b>${h(destino)}</b>` : ''}.</p>
+    ${recs.length ? `<div class="panel"><h2>Solicitudes de contraseña (${recs.length})</h2>
+      <p class="muted peq">Candidatos que olvidaron su contraseña. Abre su ficha, pulsa «Generar contraseña temporal» y envíasela por WhatsApp. Solo hazlo si el teléfono coincide.</p>
+      ${recs.map(r => `<div class="recup"><div><b>${h(r.usuario)}</b>${r.nombre ? ` · ${h(r.nombre)}` : ''} · tel. ${h(r.telefono || '')} ${Number(r.coincide) ? '<span class="badge b-verde">Teléfono coincide</span>' : r.usuario_id ? '<span class="badge b-rojo">Teléfono no coincide</span>' : '<span class="badge b-gris">Usuario no existe</span>'}<br><span class="muted peq">${fechaHora(r.creado)}</span></div>
+      <div class="botones">${r.perfil_id ? `<a class="btn btn-peq" href="/admin/candidatos/${r.perfil_id}">Abrir ficha</a>` : ''}<form method="post" action="/admin/recuperaciones/${r.id}/atendida" class="inline"><button class="btn btn-peq btn-sec">Descartar</button></form></div></div>`).join('')}
+    </div>` : ''}
     <div class="tabs"><a href="?ver=todos" class="${filtro !== 'nuevos' ? 'act' : ''}">Todos</a><a href="?ver=nuevos" class="${filtro === 'nuevos' ? 'act' : ''}">Sin leer (${num(nuevos.n)})</a></div>
     ${rows.length ? rows.map(r => `<div class="msg ${Number(r.leido) ? '' : 'nuevo'}">
       <div class="msg-top"><div><b>${h(r.nombre)}</b> · <a href="mailto:${h(r.correo)}?subject=${encodeURIComponent('Re: tu mensaje a Mies')}">${h(r.correo)}</a></div>
@@ -298,7 +350,7 @@ async function mensajes(user, url, flash) {
 }
 
 /* ---------- Router admin ---------- */
-async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, enviar, hashClave, ahora }) {
+async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, enviar, hashClave, ahora, borrarCuenta }) {
   const seg = ruta.split('/').filter(Boolean); // ['admin', ...]
   const ok = (html) => enviar(res, 200, html);
   const quien = user.usuario;
@@ -309,6 +361,33 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
     const id = parseInt(seg[2], 10);
     if (!id) return false;
     if (seg.length === 3 && m === 'GET') { const html = await detalle(user, id, flash); return html ? ok(html) : false; }
+    if (seg[3] === 'ficha' && m === 'GET') {
+      const p = await db.one('SELECT * FROM perfiles WHERE id = ?', [id]);
+      if (!p) return false;
+      const d = JSON.parse(p.datos || '{}');
+      const asignacion = await db.one("SELECT a.puesto, e.nombre AS empresa FROM asignaciones a JOIN empresas e ON e.id = a.empresa_id WHERE a.perfil_id = ? AND a.estado IN ('propuesto','entrevista') ORDER BY a.id DESC", [id]);
+      const opciones = { contacto: url.searchParams.get('contacto') === '1', salario: url.searchParams.get('salario') !== '0' };
+      return ok(P.ficha({ p, d, pts: D.puntajes(d), cv: await CV.info(p.usuario_id), opciones, asignacion }));
+    }
+    if (seg[3] === 'clave' && m === 'POST') {
+      const p = await db.one('SELECT p.usuario_id, p.datos, p.nombre, u.usuario FROM perfiles p JOIN usuarios u ON u.id = p.usuario_id WHERE p.id = ?', [id]);
+      if (!p) return false;
+      const letras = 'abcdefghjkmnpqrstuvwxyz23456789';
+      const temporal = 'mies-' + Array.from(crypto.randomBytes(6), x => letras[x % letras.length]).join('');
+      await db.q('UPDATE usuarios SET hash = ?, debe_cambiar = 1 WHERE id = ?', [hashClave(temporal), p.usuario_id]);
+      await db.q('DELETE FROM sesiones WHERE usuario_id = ?', [p.usuario_id]);
+      await db.q('UPDATE recuperaciones SET atendida = 1 WHERE usuario_id = ?', [p.usuario_id]);
+      await evento(id, 'Se generó una contraseña temporal', quien);
+      const d = JSON.parse(p.datos || '{}');
+      const texto = `Hola ${(d.nombre || p.nombre || '').split(' ')[0]}, te saluda el equipo de Mies. Para entrar a tu cuenta usa:\nUsuario: ${p.usuario}\nContraseña temporal: ${temporal}\nEntra en ${P.SITIO()}/entrar y crea tu nueva contraseña.`;
+      return redirigir(res, `/admin/candidatos/${id}`, { msg: `Contraseña temporal para «${p.usuario}»: ${temporal}`, wa: waLink(d.telefono, texto) });
+    }
+    if (seg[3] === 'eliminar' && m === 'POST') {
+      const p = await db.one('SELECT usuario_id, nombre FROM perfiles WHERE id = ?', [id]);
+      if (!p) return false;
+      await borrarCuenta(p.usuario_id);
+      return redirigir(res, '/admin/candidatos', { msg: `Se eliminó a ${p.nombre || 'el candidato'} con todos sus datos.` });
+    }
     if (seg[3] === 'cv' && m === 'GET') {
       const p = await db.one('SELECT usuario_id FROM perfiles WHERE id = ?', [id]);
       if (p && await CV.enviar(res, p.usuario_id, url.searchParams.has('descargar'))) return;
@@ -318,7 +397,10 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
       if (!['aceptado', 'en_espera', 'rechazado'].includes(b.estado)) return redirigir(res, `/admin/candidatos/${id}`);
       await db.q('UPDATE perfiles SET estado = ?, nota_admin = ? WHERE id = ?', [b.estado, b.nota || null, id]);
       await evento(id, `Estado cambiado a «${D.ESTADOS[b.estado].t}»${b.nota ? ': ' + b.nota : ''}`, quien);
-      return redirigir(res, `/admin/candidatos/${id}`, { msg: `Perfil marcado como ${D.ESTADOS[b.estado].t}.` });
+      const pp = await db.one('SELECT * FROM perfiles WHERE id = ?', [id]);
+      const dd = JSON.parse(pp.datos || '{}');
+      const t = plantillas(pp, dd, null).find(x => x[0] === b.estado);
+      return redirigir(res, `/admin/candidatos/${id}`, { msg: `Perfil marcado como ${D.ESTADOS[b.estado].t}.`, wa: t ? waLink(dd.telefono, t[2]) : null });
     }
     if (seg[3] === 'asignar' && m === 'POST') {
       let empresaId = parseInt(b.empresa_id, 10) || null, solId = parseInt(b.solicitud_id, 10) || null, puesto = b.puesto || '';
@@ -332,7 +414,10 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
       if (!e) return redirigir(res, `/admin/candidatos/${id}`, { tipo: 'error', msg: 'Empresa no encontrada.' });
       await db.q('INSERT INTO asignaciones (perfil_id, empresa_id, solicitud_id, puesto, estado, nota, creado, actualizado) VALUES (?,?,?,?,?,?,?,?)', [id, empresaId, solId, puesto, 'propuesto', b.nota || null, ahora(), ahora()]);
       await evento(id, `Propuesto a ${e.nombre}${puesto ? ' como ' + puesto : ''}`, quien);
-      return redirigir(res, `/admin/candidatos/${id}`, { msg: `Candidato asignado a ${e.nombre}.` });
+      const pp = await db.one('SELECT * FROM perfiles WHERE id = ?', [id]);
+      const dd = JSON.parse(pp.datos || '{}');
+      const t = plantillas(pp, dd, { empresa: e.nombre, puesto }).find(x => x[0] === 'propuesto');
+      return redirigir(res, `/admin/candidatos/${id}`, { msg: `Candidato asignado a ${e.nombre}.`, wa: waLink(dd.telefono, t[2]) });
     }
   }
   if (seg[1] === 'asignaciones' && seg[3] === 'estado' && m === 'POST') {
@@ -347,7 +432,10 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
       if (!otra) { await db.q("UPDATE perfiles SET estado = 'aceptado' WHERE id = ?", [a.perfil_id]); extra = ' El candidato volvió al mercado laboral.'; }
     }
     await evento(a.perfil_id, `${a.empresa}: ${D.ESTADOS_ASIG[b.estado].t}`, quien);
-    return redirigir(res, `/admin/candidatos/${a.perfil_id}`, { msg: 'Colocación actualizada.' + extra });
+    const pp = await db.one('SELECT * FROM perfiles WHERE id = ?', [a.perfil_id]);
+    const dd = JSON.parse(pp.datos || '{}');
+    const t = plantillas(pp, dd, { ...a, estado: b.estado }).find(x => x[0] === b.estado);
+    return redirigir(res, `/admin/candidatos/${a.perfil_id}`, { msg: 'Colocación actualizada.' + extra, wa: t ? waLink(dd.telefono, t[2]) : null });
   }
   if (seg[1] === 'empresas') {
     const campos = (x) => [x.nombre, x.rnc, x.sector, x.contacto, x.telefono, x.correo, x.direccion, x.notas];
@@ -389,6 +477,10 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
     await db.q('INSERT INTO usuarios (usuario, hash, rol, creado) VALUES (?,?,?,?)', [u, hashClave(b.clave), 'admin', ahora()]);
     return redirigir(res, '/admin/usuarios', { msg: `Administrador ${u} creado.` });
   }
+  if (seg[1] === 'recuperaciones' && seg[3] === 'atendida' && m === 'POST') {
+    await db.q('UPDATE recuperaciones SET atendida = 1 WHERE id = ?', [parseInt(seg[2], 10) || 0]);
+    return redirigir(res, '/admin/mensajes');
+  }
   if (seg[1] === 'mensajes') {
     if (seg.length === 2 && m === 'GET') return ok(await mensajes(user, url, flash));
     const mid = parseInt(seg[2], 10);
@@ -397,7 +489,7 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
   }
   if (seg[1] === 'respaldo' && m === 'GET') {
     const datos = { generado: new Date().toISOString(), version: 1, tablas: {} };
-    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs', 'mensajes']) {
+    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs', 'mensajes', 'recuperaciones']) {
       datos.tablas[t] = await db.q(`SELECT * FROM ${t} ORDER BY id`);
     }
     // Los archivos del CV van en base64 dentro del JSON

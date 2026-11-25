@@ -31,7 +31,16 @@ const TABLAS = (pk, blob) => [
     tamano INTEGER NOT NULL, contenido ${blob} NOT NULL, subido TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS mensajes (
     id ${pk}, nombre TEXT NOT NULL, correo TEXT NOT NULL, mensaje TEXT NOT NULL,
-    leido INTEGER NOT NULL DEFAULT 0, correo_enviado INTEGER NOT NULL DEFAULT 0, creado TEXT NOT NULL)`
+    leido INTEGER NOT NULL DEFAULT 0, correo_enviado INTEGER NOT NULL DEFAULT 0, creado TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS recuperaciones (
+    id ${pk}, usuario_id INTEGER, usuario TEXT NOT NULL, telefono TEXT, coincide INTEGER NOT NULL DEFAULT 0,
+    atendida INTEGER NOT NULL DEFAULT 0, creado TEXT NOT NULL)`
+];
+
+// Columnas agregadas después de la primera versión (se ignoran si ya existen)
+const COLUMNAS = [
+  ['usuarios', 'debe_cambiar', 'INTEGER NOT NULL DEFAULT 0'],
+  ['perfiles', 'tel_norm', 'TEXT']
 ];
 
 async function init() {
@@ -42,11 +51,13 @@ async function init() {
     const needSsl = process.env.PGSSL === '1' || /\.render\.com|sslmode=require/.test(url);
     pool = new Pool({ connectionString: url, ssl: needSsl ? { rejectUnauthorized: false } : false, max: 5 });
     for (const sql of TABLAS('SERIAL PRIMARY KEY', 'BYTEA')) await pool.query(sql);
+    for (const [t, c, def] of COLUMNAS) await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS ${c} ${def}`);
   } else {
     engine = 'sqlite';
     const { DatabaseSync } = require('node:sqlite');
     lite = new DatabaseSync(process.env.SQLITE_FILE || 'mies-local.db');
     for (const sql of TABLAS('INTEGER PRIMARY KEY AUTOINCREMENT', 'BLOB')) lite.exec(sql);
+    for (const [t, c, def] of COLUMNAS) { try { lite.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`); } catch { } }
   }
   console.log('Base de datos lista:', engine);
 }

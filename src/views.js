@@ -14,7 +14,10 @@ const badge = (estado, mapa = D.ESTADOS) => {
 
 const LOGO = `<svg class="logo-ic" viewBox="0 0 32 32" aria-hidden="true"><g fill="currentColor"><path d="M15 30h2V12h-2z"/><ellipse cx="16" cy="5" rx="2.2" ry="3.6"/><ellipse cx="12.2" cy="10" rx="2" ry="3.4" transform="rotate(-35 12.2 10)"/><ellipse cx="19.8" cy="10" rx="2" ry="3.4" transform="rotate(35 19.8 10)"/><ellipse cx="12.2" cy="16" rx="2" ry="3.4" transform="rotate(-35 12.2 16)"/><ellipse cx="19.8" cy="16" rx="2" ry="3.4" transform="rotate(35 19.8 16)"/><ellipse cx="12.4" cy="22" rx="1.9" ry="3.2" transform="rotate(-35 12.4 22)"/><ellipse cx="19.6" cy="22" rx="1.9" ry="3.2" transform="rotate(35 19.6 22)"/></g></svg>`;
 
-function layout({ title, user, body, flash, admin = false }) {
+const DESC = 'Mies conecta a empresas con técnicos, operarios y profesionales que se distinguen por su responsabilidad, ética, integridad y respeto. Regístrate gratis en República Dominicana.';
+function layout({ title, user, body, flash, admin = false, description = DESC, noindex = false }) {
+  const sitio = process.env.SITIO_URL || 'https://mies-c85p.onrender.com';
+  const titulo = `${title && title !== 'Inicio' ? title + ' · ' : ''}Mies · Banco de talento con valores`;
   let nav;
   if (!user) {
     nav = `<a href="/contacto" class="nav-link">Contacto</a><a href="/registro" class="nav-link">Registrarme</a><a href="/entrar" class="nav-link fuerte">Entrar</a>`;
@@ -22,13 +25,26 @@ function layout({ title, user, body, flash, admin = false }) {
     nav = `<a href="/admin" class="nav-link">Panel</a><a href="/admin/candidatos" class="nav-link">Candidatos</a><a href="/admin/empresas" class="nav-link">Empresas</a><a href="/admin/mensajes" class="nav-link">Mensajes</a>
       <form method="post" action="/salir" class="inline"><button class="nav-link boton-link">Salir</button></form>`;
   } else {
-    nav = `<a href="/contacto" class="nav-link">Contacto</a><a href="/perfil" class="nav-link fuerte">Mi perfil</a>
+    nav = `<a href="/contacto" class="nav-link">Contacto</a><a href="/perfil" class="nav-link fuerte">Mi perfil</a><a href="/cuenta" class="nav-link">Mi cuenta</a>
       <form method="post" action="/salir" class="inline"><button class="nav-link boton-link">Salir</button></form>`;
   }
-  const fl = flash ? `<div class="flash flash-${h(flash.tipo || 'ok')}">${h(flash.msg)}</div>` : '';
+  const fl = flash ? `<div class="flash flash-${h(flash.tipo || 'ok')}">${h(flash.msg)}${flash.wa ? ` <a class="btn btn-peq btn-wa" target="_blank" rel="noopener" href="${h(flash.wa)}">Enviar por WhatsApp</a>` : ''}</div>` : '';
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${h(title ? title + ' · ' : '')}Mies · Banco de talento con valores</title>
+<title>${h(titulo)}</title>
+<meta name="description" content="${h(description)}">
+${noindex || admin ? '<meta name="robots" content="noindex, nofollow">' : ''}
+<meta name="theme-color" content="#3d4a26">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Mies">
+<meta property="og:locale" content="es_DO">
+<meta property="og:title" content="${h(title && title !== 'Inicio' ? titulo : 'Mies · Tu talento y tus valores, en un solo perfil')}">
+<meta property="og:description" content="${h(description)}">
+<meta property="og:image" content="${sitio}/static/og.png">
+<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Mies · Banco de talento con valores">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icono-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/estilo.css?v=5"></head>
@@ -38,7 +54,7 @@ function layout({ title, user, body, flash, admin = false }) {
   <nav>${nav}</nav>
 </div></header>
 <main>${fl}${body}</main>
-<footer class="pie"><div class="wrap pie-in"><span>Mies · Banco de talento con valores · República Dominicana</span><a href="/contacto">Contáctanos</a></div></footer>
+<footer class="pie"><div class="wrap pie-in"><span>Mies · Banco de talento con valores · República Dominicana</span><span class="pie-links"><a href="/contacto">Contáctanos</a><a href="/privacidad">Privacidad</a></span></div></footer>
 </body></html>`;
 }
 
@@ -114,6 +130,7 @@ function authForm({ user, modo, error, usuario = '' }) {
     ${reg ? '<label>Repite la contraseña<input type="password" name="clave2" required minlength="6" autocomplete="new-password"></label>' : ''}
     <button class="btn ancho">${reg ? 'Crear cuenta' : 'Entrar'}</button>
   </form>
+  ${reg ? '<p class="centro peq muted">Al crear tu cuenta aceptas nuestra <a href="/privacidad">política de privacidad</a>.</p>' : '<p class="centro"><a href="/recuperar">¿Olvidaste tu contraseña?</a></p>'}
   <p class="centro">${reg ? '¿Ya tienes cuenta? <a href="/entrar">Entra aquí</a>' : '¿Primera vez? <a href="/registro">Crea tu cuenta</a>'}</p>
 </section>`
   });
@@ -222,7 +239,7 @@ function perfilForm({ user, perfil, d, errores = [], flash, cv = null }) {
     </section>
 
     <section class="bloque"><h2>Tu consentimiento</h2><p class="sub">Solo usamos tu información para conectarte con empleadores.</p>
-      <div class="caja"><label class="check"><input type="checkbox" name="consentimiento" value="si"${d.consentimiento === 'si' ? ' checked' : ''}> <span>Autorizo que mis datos, incluidas mis respuestas opcionales sobre fe si las di, se compartan con empleadores registrados en Mies y que se contacte a mi referencia.</span></label></div>
+      <div class="caja"><label class="check"><input type="checkbox" name="consentimiento" value="si"${d.consentimiento === 'si' ? ' checked' : ''}> <span>Autorizo que mis datos, incluidas mis respuestas opcionales sobre fe si las di, se compartan con empleadores registrados en Mies y que se contacte a mi referencia, según la <a href="/privacidad" target="_blank">política de privacidad</a>.</span></label></div>
     </section>
 
     <div class="barra-acciones">

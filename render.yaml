@@ -16,6 +16,8 @@ services:
         value: admin
       - key: ADMIN_PASS
         sync: false
+      - key: SITIO_URL
+        value: https://mies-c85p.onrender.com
       - key: CONTACTO_CORREO
         sync: false
       - key: NODE_VERSION

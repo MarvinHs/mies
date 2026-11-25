@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const db = require(path.join(__dirname, '..', 'src', 'db'));
 
-const ORDEN = ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs', 'mensajes'];
+const ORDEN = ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs', 'mensajes', 'recuperaciones'];
 
 (async () => {
   const archivo = process.argv[2];

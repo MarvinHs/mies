@@ -7,7 +7,7 @@ const { h, fecha, fechaHora, badge, layout } = V;
 const lay = (o) => layout({ ...o, admin: true });
 const evento = (perfilId, texto, autor) => db.q('INSERT INTO eventos (perfil_id, texto, autor, fecha) VALUES (?,?,?,?)', [perfilId, texto, autor, new Date().toISOString()]);
 const num = (x) => Number(x || 0);
-const subnav = (activo) => `<div class="subnav">${[['/admin', 'Resumen'], ['/admin/candidatos', 'Candidatos'], ['/admin/empresas', 'Empresas'], ['/admin/solicitudes', 'Solicitudes'], ['/admin/usuarios', 'Administradores']]
+const subnav = (activo) => `<div class="subnav">${[['/admin', 'Resumen'], ['/admin/candidatos', 'Candidatos'], ['/admin/empresas', 'Empresas'], ['/admin/solicitudes', 'Solicitudes'], ['/admin/mensajes', 'Mensajes'], ['/admin/usuarios', 'Administradores']]
   .map(([u, t]) => `<a href="${u}" class="${activo === u ? 'act' : ''}">${t}</a>`).join('')}</div>`;
 
 /* ---------- Resumen ---------- */
@@ -16,6 +16,7 @@ async function resumen(user, flash) {
   for (const r of await db.q("SELECT estado, COUNT(*) AS n FROM perfiles GROUP BY estado")) cuentas[r.estado] = num(r.n);
   const emp = await db.one('SELECT COUNT(*) AS n FROM empresas');
   const sol = await db.one("SELECT COUNT(*) AS n FROM solicitudes WHERE estado = 'abierta'");
+  const msj = await db.one('SELECT COUNT(*) AS n FROM mensajes WHERE leido = 0');
   const ult = await db.q("SELECT id, nombre, oficio, provincia, enviado, puntaje FROM perfiles WHERE estado = 'pendiente' ORDER BY enviado DESC LIMIT 8");
   const tiles = Object.entries(D.ESTADOS).map(([k, e]) => `<a class="tile t-${e.c}" href="/admin/candidatos?estado=${k}"><b>${cuentas[k] || 0}</b><span>${h(e.t)}</span></a>`).join('');
   return lay({
@@ -24,6 +25,7 @@ async function resumen(user, flash) {
     <div class="tiles">${tiles}
       <a class="tile t-neutro" href="/admin/empresas"><b>${num(emp.n)}</b><span>Empresas</span></a>
       <a class="tile t-neutro" href="/admin/solicitudes"><b>${num(sol.n)}</b><span>Solicitudes abiertas</span></a>
+      <a class="tile ${num(msj.n) ? 't-oro' : 't-neutro'}" href="/admin/mensajes"><b>${num(msj.n)}</b><span>Mensajes sin leer</span></a>
     </div>
     <h2>Pendientes de revisión</h2>
     ${ult.length ? tablaPerfiles(ult, false) : '<p class="vacio">No hay registros pendientes. 🎉</p>'}
@@ -256,7 +258,7 @@ async function usuarios(user, flash) {
     <div class="grid-det"><div>
       <table class="tabla"><thead><tr><th>Usuario</th><th>Creado</th></tr></thead><tbody>${rows.map(r => `<tr><td>${h(r.usuario)}${r.id === user.id ? ' <span class="muted">(tú)</span>' : ''}</td><td>${fecha(r.creado)}</td></tr>`).join('')}</tbody></table>
       <p class="muted">${num(cand.n)} cuenta(s) de candidatos registradas.</p>
-      <div class="panel mt"><h2>Respaldo de datos</h2><p class="muted">Descarga una copia de toda la información (usuarios, perfiles, currículums, empresas, solicitudes, colocaciones e historial) en un archivo JSON. Guárdalo en un lugar seguro: contiene datos personales.</p>
+      <div class="panel mt"><h2>Respaldo de datos</h2><p class="muted">Descarga una copia de toda la información (usuarios, perfiles, currículums, empresas, solicitudes, colocaciones, mensajes e historial) en un archivo JSON. Guárdalo en un lugar seguro: contiene datos personales.</p>
       <a class="btn" href="/admin/respaldo">Descargar respaldo</a></div>
     </div><aside>
       <div class="panel"><h2>Nuevo administrador</h2><form method="post" action="/admin/usuarios">
@@ -268,6 +270,30 @@ async function usuarios(user, flash) {
         <label>Repítela<input type="password" name="clave2" required minlength="8"></label>
         <button class="btn ancho">Cambiar contraseña</button></form></div>
     </aside></div></section>`
+  });
+}
+
+/* ---------- Mensajes de contacto ---------- */
+async function mensajes(user, url, flash) {
+  const filtro = url.searchParams.get('ver') || 'todos';
+  const rows = await db.q(`SELECT * FROM mensajes ${filtro === 'nuevos' ? 'WHERE leido = 0' : ''} ORDER BY id DESC LIMIT 300`);
+  const nuevos = await db.one('SELECT COUNT(*) AS n FROM mensajes WHERE leido = 0');
+  const destino = process.env.CONTACTO_CORREO;
+  return lay({
+    user, flash, title: 'Mensajes', body: `<section class="wrap">${subnav('/admin/mensajes')}
+    <h1>Mensajes de contacto</h1>
+    <p class="muted">Los mensajes del formulario de contacto se guardan aquí${destino ? ` y se envían a <b>${h(destino)}</b>` : ''}.</p>
+    <div class="tabs"><a href="?ver=todos" class="${filtro !== 'nuevos' ? 'act' : ''}">Todos</a><a href="?ver=nuevos" class="${filtro === 'nuevos' ? 'act' : ''}">Sin leer (${num(nuevos.n)})</a></div>
+    ${rows.length ? rows.map(r => `<div class="msg ${Number(r.leido) ? '' : 'nuevo'}">
+      <div class="msg-top"><div><b>${h(r.nombre)}</b> · <a href="mailto:${h(r.correo)}?subject=${encodeURIComponent('Re: tu mensaje a Mies')}">${h(r.correo)}</a></div>
+      <span class="muted peq">${fechaHora(r.creado)}${Number(r.correo_enviado) ? ' · ✉ enviado por correo' : ' · solo en el panel'}</span></div>
+      <p class="msg-txt">${h(r.mensaje)}</p>
+      <div class="botones">
+        <a class="btn btn-peq" href="mailto:${h(r.correo)}?subject=${encodeURIComponent('Re: tu mensaje a Mies')}">Responder</a>
+        <form method="post" action="/admin/mensajes/${r.id}/leido" class="inline"><button class="btn btn-peq btn-sec" name="leido" value="${Number(r.leido) ? 0 : 1}">${Number(r.leido) ? 'Marcar como no leído' : 'Marcar como leído'}</button></form>
+        <form method="post" action="/admin/mensajes/${r.id}/borrar" class="inline" onsubmit="return confirm('¿Borrar este mensaje?')"><button class="btn btn-peq btn-sec">Borrar</button></form>
+      </div></div>`).join('') : '<p class="vacio">No hay mensajes.</p>'}
+    </section>`
   });
 }
 
@@ -363,9 +389,15 @@ async function manejar({ res, ruta, m, url, user, body: b, flash, redirigir, env
     await db.q('INSERT INTO usuarios (usuario, hash, rol, creado) VALUES (?,?,?,?)', [u, hashClave(b.clave), 'admin', ahora()]);
     return redirigir(res, '/admin/usuarios', { msg: `Administrador ${u} creado.` });
   }
+  if (seg[1] === 'mensajes') {
+    if (seg.length === 2 && m === 'GET') return ok(await mensajes(user, url, flash));
+    const mid = parseInt(seg[2], 10);
+    if (mid && seg[3] === 'leido' && m === 'POST') { await db.q('UPDATE mensajes SET leido = ? WHERE id = ?', [b.leido === '1' ? 1 : 0, mid]); return redirigir(res, '/admin/mensajes'); }
+    if (mid && seg[3] === 'borrar' && m === 'POST') { await db.q('DELETE FROM mensajes WHERE id = ?', [mid]); return redirigir(res, '/admin/mensajes', { msg: 'Mensaje borrado.' }); }
+  }
   if (seg[1] === 'respaldo' && m === 'GET') {
     const datos = { generado: new Date().toISOString(), version: 1, tablas: {} };
-    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs']) {
+    for (const t of ['usuarios', 'perfiles', 'empresas', 'solicitudes', 'asignaciones', 'eventos', 'cvs', 'mensajes']) {
       datos.tablas[t] = await db.q(`SELECT * FROM ${t} ORDER BY id`);
     }
     // Los archivos del CV van en base64 dentro del JSON

@@ -17,12 +17,12 @@ const LOGO = `<svg class="logo-ic" viewBox="0 0 32 32" aria-hidden="true"><g fil
 function layout({ title, user, body, flash, admin = false }) {
   let nav;
   if (!user) {
-    nav = `<a href="/registro" class="nav-link">Registrarme</a><a href="/entrar" class="nav-link fuerte">Entrar</a>`;
+    nav = `<a href="/contacto" class="nav-link">Contacto</a><a href="/registro" class="nav-link">Registrarme</a><a href="/entrar" class="nav-link fuerte">Entrar</a>`;
   } else if (user.rol === 'admin') {
-    nav = `<a href="/admin" class="nav-link">Panel</a><a href="/admin/candidatos" class="nav-link">Candidatos</a><a href="/admin/empresas" class="nav-link">Empresas</a>
+    nav = `<a href="/admin" class="nav-link">Panel</a><a href="/admin/candidatos" class="nav-link">Candidatos</a><a href="/admin/empresas" class="nav-link">Empresas</a><a href="/admin/mensajes" class="nav-link">Mensajes</a>
       <form method="post" action="/salir" class="inline"><button class="nav-link boton-link">Salir</button></form>`;
   } else {
-    nav = `<a href="/perfil" class="nav-link fuerte">Mi perfil</a>
+    nav = `<a href="/contacto" class="nav-link">Contacto</a><a href="/perfil" class="nav-link fuerte">Mi perfil</a>
       <form method="post" action="/salir" class="inline"><button class="nav-link boton-link">Salir</button></form>`;
   }
   const fl = flash ? `<div class="flash flash-${h(flash.tipo || 'ok')}">${h(flash.msg)}</div>` : '';
@@ -38,7 +38,7 @@ function layout({ title, user, body, flash, admin = false }) {
   <nav>${nav}</nav>
 </div></header>
 <main>${fl}${body}</main>
-<footer class="pie"><div class="wrap">Mies · Banco de talento con valores · República Dominicana</div></footer>
+<footer class="pie"><div class="wrap pie-in"><span>Mies · Banco de talento con valores · República Dominicana</span><a href="/contacto">Contáctanos</a></div></footer>
 </body></html>`;
 }
 
@@ -89,6 +89,7 @@ function inicio(user) {
     </ol>
     <h3 class="mt">Para empresas</h3>
     <p>¿Necesitas personal confiable? Escríbenos y cuéntanos el puesto, la cantidad y la zona. Te enviamos candidatos evaluados en responsabilidad, ética, integridad y respeto.</p>
+    <a class="btn btn-sec" href="/contacto">Escríbenos</a>
   </div>
 </section>
 
@@ -258,4 +259,28 @@ function perfilForm({ user, perfil, d, errores = [], flash, cv = null }) {
   });
 }
 
-module.exports = { h, fecha, fechaHora, badge, layout, inicio, authForm, perfilForm, sel };
+function contacto({ user, enviado = false, errores = {}, datos = {} }) {
+  const err = (k) => errores[k] ? `<span class="campo-error">${h(errores[k])}</span>` : '';
+  const cuerpo = enviado ? `
+    <div class="caja centro gracias"><div class="gracias-ic">✓</div><h2>¡Mensaje enviado!</h2>
+    <p class="muted">Gracias por escribirnos. Te responderemos al correo que nos dejaste lo antes posible.</p>
+    <a class="btn btn-sec" href="/">Volver al inicio</a></div>` : `
+    ${errores.general ? `<div class="flash flash-error">${h(errores.general)}</div>` : ''}
+    <form method="post" action="/contacto" class="caja" novalidate>
+      <label>Tu nombre<input name="nombre" value="${h(datos.nombre)}" maxlength="120" autocomplete="name" required>${err('nombre')}</label>
+      <label>Tu correo<input type="email" name="correo" value="${h(datos.correo)}" maxlength="160" autocomplete="email" required>${err('correo')}</label>
+      <label>Mensaje<textarea name="mensaje" rows="6" maxlength="3000" required placeholder="Cuéntanos en qué te podemos ayudar. Si eres empresa, dinos el puesto, la cantidad y la zona.">${h(datos.mensaje)}</textarea>${err('mensaje')}</label>
+      <div class="trampa" aria-hidden="true"><label>No llenar<input name="sitio" tabindex="-1" autocomplete="off"></label></div>
+      <button class="btn ancho">Enviar mensaje</button>
+    </form>`;
+  return layout({
+    user, title: 'Contacto', body: `
+<section class="wrap estrecho-contacto">
+  <h1>Contáctanos</h1>
+  <p class="sub">¿Eres empresa y buscas personal, o tienes alguna pregunta sobre tu registro? Escríbenos.</p>
+  ${cuerpo}
+</section>`
+  });
+}
+
+module.exports = { contacto, h, fecha, fechaHora, badge, layout, inicio, authForm, perfilForm, sel };

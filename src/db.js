@@ -28,7 +28,10 @@ const TABLAS = (pk, blob) => [
     id ${pk}, perfil_id INTEGER NOT NULL, texto TEXT NOT NULL, autor TEXT, fecha TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS cvs (
     id ${pk}, usuario_id INTEGER UNIQUE NOT NULL, archivo TEXT NOT NULL, tipo TEXT NOT NULL,
-    tamano INTEGER NOT NULL, contenido ${blob} NOT NULL, subido TEXT NOT NULL)`
+    tamano INTEGER NOT NULL, contenido ${blob} NOT NULL, subido TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS mensajes (
+    id ${pk}, nombre TEXT NOT NULL, correo TEXT NOT NULL, mensaje TEXT NOT NULL,
+    leido INTEGER NOT NULL DEFAULT 0, correo_enviado INTEGER NOT NULL DEFAULT 0, creado TEXT NOT NULL)`
 ];
 
 async function init() {

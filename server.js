@@ -7,6 +7,7 @@ const V = require('./src/views');
 const D = require('./src/data');
 const admin = require('./src/admin');
 const CV = require('./src/cv');
+const Contacto = require('./src/contacto');
 
 const PORT = process.env.PORT || 3000;
 const COOKIE = 'mies_s';
@@ -162,6 +163,17 @@ async function manejar(req, res) {
   if (ck.mies_f) { try { flash = JSON.parse(ck.mies_f); } catch { } res.setHeader('Set-Cookie', 'mies_f=; Path=/; Max-Age=0'); }
 
   if (ruta === '/' && m === 'GET') return enviar(res, 200, V.inicio(user));
+
+  if (ruta === '/contacto') {
+    if (m === 'GET') return enviar(res, 200, V.contacto({ user, enviado: url.searchParams.has('enviado') }));
+    if (m === 'POST') {
+      const b = await leerCuerpo(req);
+      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      const r = await Contacto.recibir(b, ip);
+      if (r.ok) return redirigir(res, '/contacto?enviado=1');
+      return enviar(res, 400, V.contacto({ user, errores: r.errores, datos: r.datos }));
+    }
+  }
 
   if (ruta === '/registro' || ruta === '/entrar') {
     const modo = ruta === '/registro' ? 'registro' : 'entrar';

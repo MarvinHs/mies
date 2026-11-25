@@ -12,6 +12,11 @@ Plataforma de reclutamiento y colocación laboral para República Dominicana.
 - **Currículum opcional** (PDF o Word, máx. 2 MB). Se guarda en la base de datos; solo lo ven el candidato y los administradores.
 - Pueden guardar como borrador y enviar cuando esté completo. Ven el estado de su perfil.
 
+**Contacto** (`/contacto`)
+- Formulario con nombre, correo y mensaje. Se guarda en el panel (Mensajes) y se envía por correo con FormSubmit
+  al correo de la variable `CONTACTO_CORREO`. El primer envío manda a ese correo un enlace de activación de FormSubmit que hay que confirmar una sola vez.
+- Protección: campo trampa para bots y máximo 5 mensajes por hora por IP.
+
 **Administración** (`/admin`)
 - Resumen con conteo por estado.
 - Lista de candidatos con filtros (estado, oficio, provincia, búsqueda) y orden por puntaje de valores.
@@ -38,6 +43,7 @@ El puntaje total es el promedio de los cuatro valores. Las respuestas de fe no a
 |---|---|
 | `DATABASE_URL` | Cadena de conexión PostgreSQL |
 | `ADMIN_USER` / `ADMIN_PASS` | Administrador inicial (solo se crea si no existe ningún admin) |
+| `CONTACTO_CORREO` | Correo que recibe los mensajes del formulario de contacto |
 | `PORT` | Puerto (Render lo asigna) |
 
 ## Correr localmente
